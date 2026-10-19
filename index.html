@@ -2299,7 +2299,7 @@ function openEditUserModal(userId){
     const p=toPer(c);
     if(!_seen[p]){_seen[p]=true;classOptions.push(S.classes[p]?p:c);}
   });
-  const currentClassCode=u.classCode||u.class_code||'';
+  const userClasses=(u.class_codes||[u.classCode||u.class_code||'']).filter(Boolean);
   // Build class checkboxes (multi-select, matching create modal design)
   let classCheckboxes='';
   if(classOptions.length===0){
@@ -2307,7 +2307,7 @@ function openEditUserModal(userId){
   }else{
     classCheckboxes='<div style="display:flex;flex-wrap:wrap;gap:6px;">';
     classOptions.forEach(c=>{
-      const checked=(c===currentClassCode||toPer(c)===toPer(currentClassCode))?'checked':'';
+      const checked=userClasses.some(uc=>c===uc||toPer(c)===toPer(uc))?'checked':'';
       classCheckboxes+=`<label style="display:flex;align-items:center;gap:4px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:12px;"><input type="checkbox" value="${c}" class="edit-class-cb" ${checked}> ${c}</label>`;
     });
     classCheckboxes+='</div>';
@@ -2361,23 +2361,13 @@ function openEditUserModal(userId){
       const updatePayload={username:newUsername,name:newName};
       if(newPassword){updatePayload.password_hash=newPassword;}
       updatePayload.role=newRole;
+      updatePayload.class_codes=selectedClasses;
       updatePayload.class_code=selectedClasses[0]||null;
       updatePayload.must_change_password=mustChangePw;
       // Update the current user (first selected class, or null if none)
       const{error}=await sb.from('users').update(updatePayload).eq('id',userId);
       if(error)throw new Error(error.message);
-      // If multiple classes selected, create one user per additional class (like create modal)
-      if(selectedClasses.length>1){
-        for(let i=1;i<selectedClasses.length;i++){
-          const cls=selectedClasses[i];
-          const clsNum=cls.replace(/[^۰-۹0-9]/g,'');
-          const uname=selectedClasses.length>1?(newUsername+'_'+clsNum):newUsername;
-          const insPayload={username:uname,name:newName,role:newRole,class_code:cls,must_change_password:mustChangePw};
-          if(newPassword){insPayload.password_hash=newPassword;}
-          const{error:e2}=await sb.from('users').insert(insPayload);
-          if(e2)console.log('Create extra class user error for',uname,e2.message);
-        }
-      }
+      // Single user update - no more duplicate users per class
       closeModal(overlay);
       showToast('✅ کاربر ویرایش شد');
       loadAdminUsers();
@@ -2454,26 +2444,14 @@ async function openCreateUserModal(){
     // Create user for each selected class (or one if only one class)
     const sb=getSupabase();
     try{
-      if(selectedClasses.length===0){
-        // No class - create single user
-        const{data,error}=await sb.from('users').insert({username,password_hash:password,name,role,must_change_password:false});
-        if(error)throw error;
-      }else{
-        // Create one user per class (for teachers with multiple classes)
-        for(let i=0;i<selectedClasses.length;i++){
-          const cls=selectedClasses[i];
-          let uname=username;
-          if(selectedClasses.length>1){
-            // If multiple classes, append class number to username
-            const clsNum=cls.replace(/[^0-9]/g,'');
-            uname=username+'_'+clsNum;
-          }
-          const{data,error}=await sb.from('users').insert({username:uname,password_hash:password,name,role,class_code:cls,must_change_password:false});
-          if(error){
-            console.log('Create user error for',uname,error.message);
-          }
-        }
-      }
+      // Single user - store all selected classes (no more duplicate users per class)
+      const{data,error}=await sb.from('users').insert({
+        username,password_hash:password,name,role,
+        class_codes:selectedClasses,
+        class_code:selectedClasses[0]||null,
+        must_change_password:false
+      });
+      if(error)throw error;
       closeModal(overlay);
       showToast('✅ کاربر ساخته شد');
       loadAdminUsers();
