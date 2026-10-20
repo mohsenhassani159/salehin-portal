@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover">
 <meta name="theme-color" content="#0F4C5C">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="پرتال صالحین">
@@ -2253,17 +2254,21 @@ function renderAdmin(){
 
 // ====== ADMIN USER MANAGEMENT (via API) ======
 let adminUsersCache=[];
-async function loadAdminUsers(){
+async async function loadAdminUsers(){
   const list=document.getElementById('admin-users-list');
   if(!list)return;
   list.innerHTML='<div style="text-align:center;padding:20px;color:var(--text-light);">⏳ در حال بارگذاری...</div>';
-  const token=getAuthToken();
-  if(!token){list.innerHTML='<div style="text-align:center;padding:20px;color:var(--danger);">برای مدیریت کاربران باید آنلاین باشید.</div>';return;}
+  const sb=getSupabase();
+  if(!sb){list.innerHTML='<div style="text-align:center;padding:20px;color:var(--danger);">برای مدیریت کاربران باید آنلاین باشید.</div>';return;}
   try{
-    const res=await fetch('/api/portal/admin/users',{headers:{'Authorization':`Bearer ${token}`}});
-    if(!res.ok)throw new Error('خطا در بارگذاری');
-    const data=await res.json();
-    adminUsersCache=data.users||[];
+    const {data, error} = await sb.from('users').select('*');
+    if(error)throw new Error(error.message||'خطا در بارگذاری');
+    adminUsersCache=(data||[]).map(u=>({
+      id:u.id, username:u.username, name:u.name, role:u.role,
+      class_code:u.class_code, class_codes:u.class_codes||[],
+      password_hash:u.password_hash, mustChangePassword:u.must_change_password||u.mustChangePassword||false,
+      child_username:u.child_username||u.childUsername||null
+    }));
     renderAdminUsersList();
   }catch(e){
     list.innerHTML='<div style="text-align:center;padding:20px;color:var(--danger);">❌ '+e.message+'</div>';
@@ -2281,7 +2286,7 @@ function renderAdminUsersList(){
     const usersOfRole=adminUsersCache.filter(u=>u.role===role);
     usersOfRole.forEach(u=>{
       const isDefault=u.mustChangePassword;
-      h+=`<tr style="background:${role==='ADMIN'?'var(--primary-light)':''};"><td><span class="qualitative-badge ${role==='ADMIN'?'qual-excellent':role==='TEACHER'?'qual-good':role==='PARENT'?'qual-fair':'qual-poor'}">${roleLabels[role]||role}</span></td><td style="font-weight:bold;">${u.name||'—'}</td><td><code>${u.username}</code></td><td>${u.classCode||'—'}</td><td>${u.childName?(u.childName+' ('+u.childClass+')'):'—'}</td><td>${isDefault?'<span style="color:var(--warning);">⚠️ پیش‌فرض</span>':'<span style="color:var(--success);">✓ تغییر یافته</span>'}</td><td><div style="display:flex;gap:4px;"><button onclick="openEditUserModal('${u.id}')" style="padding:4px 8px;background:var(--primary-light);color:var(--primary);border:1px solid var(--primary);border-radius:4px;font-size:10px;cursor:pointer;">✏️ ویرایش</button><button onclick="resetUserPasswordAPI('${u.id}')" style="padding:4px 8px;background:var(--warning-light);color:var(--warning);border:1px solid var(--warning);border-radius:4px;font-size:10px;cursor:pointer;">🔄 ریست</button><button onclick="deleteUserAPI('${u.id}','${u.name||''}')" style="padding:4px 8px;background:var(--danger-light);color:var(--danger);border:1px solid var(--danger);border-radius:4px;font-size:10px;cursor:pointer;">🗑️</button></div></td></tr>`;
+      h+=`<tr style="background:${role==='ADMIN'?'var(--primary-light)':''};"><td><span class="qualitative-badge ${role==='ADMIN'?'qual-excellent':role==='TEACHER'?'qual-good':role==='PARENT'?'qual-fair':'qual-poor'}">${roleLabels[role]||role}</span></td><td style="font-weight:bold;">${u.name||'—'}</td><td><code>${u.username}</code></td><td>${(Array.isArray(u.classCodes)?u.classCodes:(Array.isArray(u.class_codes)?u.class_codes:(u.classCode?[u.classCode]:[]))).join('، ')||u.classCode||'—'}</td><td>${u.childName?(u.childName+' ('+u.childClass+')'):'—'}</td><td>${isDefault?'<span style="color:var(--warning);">⚠️ پیش‌فرض</span>':'<span style="color:var(--success);">✓ تغییر یافته</span>'}</td><td><div style="display:flex;gap:4px;"><button onclick="openEditUserModal('${u.id}')" style="padding:4px 8px;background:var(--primary-light);color:var(--primary);border:1px solid var(--primary);border-radius:4px;font-size:10px;cursor:pointer;">✏️ ویرایش</button><button onclick="resetUserPasswordAPI('${u.id}')" style="padding:4px 8px;background:var(--warning-light);color:var(--warning);border:1px solid var(--warning);border-radius:4px;font-size:10px;cursor:pointer;">🔄 ریست</button><button onclick="deleteUserAPI('${u.id}','${u.name||''}')" style="padding:4px 8px;background:var(--danger-light);color:var(--danger);border:1px solid var(--danger);border-radius:4px;font-size:10px;cursor:pointer;">🗑️</button></div></td></tr>`;
     });
   });
   h+='</tbody></table></div>';
@@ -2299,7 +2304,7 @@ function openEditUserModal(userId){
     const p=toPer(c);
     if(!_seen[p]){_seen[p]=true;classOptions.push(S.classes[p]?p:c);}
   });
-  const userClasses=(u.class_codes||[u.classCode||u.class_code||'']).filter(Boolean);
+  const currentClassCodes=Array.isArray(u.classCodes)?u.classCodes:(Array.isArray(u.class_codes)?u.class_codes:((u.classCode||u.class_code)?[u.classCode||u.class_code]:[]));
   // Build class checkboxes (multi-select, matching create modal design)
   let classCheckboxes='';
   if(classOptions.length===0){
@@ -2307,7 +2312,7 @@ function openEditUserModal(userId){
   }else{
     classCheckboxes='<div style="display:flex;flex-wrap:wrap;gap:6px;">';
     classOptions.forEach(c=>{
-      const checked=userClasses.some(uc=>c===uc||toPer(c)===toPer(uc))?'checked':'';
+      const checked=currentClassCodes.some(code=>c===code||toPer(c)===toPer(code))?'checked':'';
       classCheckboxes+=`<label style="display:flex;align-items:center;gap:4px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:12px;"><input type="checkbox" value="${c}" class="edit-class-cb" ${checked}> ${c}</label>`;
     });
     classCheckboxes+='</div>';
@@ -2348,7 +2353,7 @@ function openEditUserModal(userId){
     const newName=document.getElementById('edit-name').value.trim();
     const newPassword=document.getElementById('edit-password').value;
     const newRole=document.getElementById('edit-role').value;
-    const mustChangePw=document.getElementById('edit-must-change-pw').checked;
+    const mustChangePassword=Boolean(document.getElementById('edit-must-change-pw').checked);
     // Collect all checked classes (multi-select like create modal)
     const selectedClasses=Array.from(document.querySelectorAll('.edit-class-cb:checked')).map(cb=>cb.value);
     if(!newUsername||!newName){showToast('نام کاربری و نام نمایشی لازم است');return;}
@@ -2363,14 +2368,28 @@ function openEditUserModal(userId){
       updatePayload.role=newRole;
       updatePayload.class_codes=selectedClasses;
       updatePayload.class_code=selectedClasses[0]||null;
-      updatePayload.must_change_password=mustChangePw;
-      // Update the current user (first selected class, or null if none)
+      updatePayload.must_change_password=mustChangePassword;
+      // Keep one user row and store all selected classes on it.
       const{error}=await sb.from('users').update(updatePayload).eq('id',userId);
       if(error)throw new Error(error.message);
-      // Single user update - no more duplicate users per class
+      // Persist local state and keep S.users in sync with the database
+      try{saveS();}catch(e){console.warn('saveS failed:',e);}
+      try{
+        const u=(S.users||[]).find(x=>x.id===userId||String(x.id)===String(userId));
+        if(u){u.username=newUsername;u.name=newName;u.role=newRole;
+          u.class_codes=selectedClasses;u.class_code=selectedClasses[0]||null;
+          if(newPassword)u.password_hash=newPassword;
+          u.mustChangePassword=mustChangePassword;u.must_change_password=mustChangePassword;}
+        else{
+          const{data:fu}=await sb.from('users').select('*').eq('id',userId).maybeSingle();
+          if(fu){S.users=(S.users||[]).filter(x=>x.id!==userId&&String(x.id)!==String(userId));S.users.push(fu);}
+        }
+        saveS();
+      }catch(e){console.warn('S.users sync failed:',e);}
       closeModal(overlay);
       showToast('✅ کاربر ویرایش شد');
-      loadAdminUsers();
+      try{renderAdminUsersList();}catch(e){}
+      try{loadAdminUsers();}catch(e){}
     }catch(e){showToast('❌ '+e.message);btn.disabled=false;btn.textContent='💾 ذخیره تغییرات';}
   };
 }
@@ -2441,16 +2460,11 @@ async function openCreateUserModal(){
     if(!username||!password||!name){showToast('همه فیلدها لازم است');return;}
     const btn=document.getElementById('create-save');
     btn.disabled=true;btn.textContent='⏳ در حال ایجاد...';
-    // Create user for each selected class (or one if only one class)
+    // Create a single user row; class_codes stores the multi-class selection.
     const sb=getSupabase();
+    if(!sb){showToast('آنلاین نیستید');btn.disabled=false;btn.textContent='➕ ایجاد';return;}
     try{
-      // Single user - store all selected classes (no more duplicate users per class)
-      const{data,error}=await sb.from('users').insert({
-        username,password_hash:password,name,role,
-        class_codes:selectedClasses,
-        class_code:selectedClasses[0]||null,
-        must_change_password:false
-      });
+      const{error}=await sb.from('users').insert({username,password_hash:password,name,role,class_codes:selectedClasses,class_code:selectedClasses[0]||null,must_change_password:false});
       if(error)throw error;
       closeModal(overlay);
       showToast('✅ کاربر ساخته شد');
